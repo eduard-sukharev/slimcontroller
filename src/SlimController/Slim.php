@@ -32,6 +32,11 @@ class Slim extends \Slim\Slim
     protected $routeNames = array();
 
     /**
+     * @var bool Whether to skip notFound callback or not
+     */
+    private $skipNotFound;
+
+    /**
      * Add multiple controller based routes
      *
      * Simple Format
@@ -154,6 +159,45 @@ class Slim extends \Slim\Slim
         $route = call_user_func_array(array($this, 'map'), $middleware);
 
         return $route;
+    }
+
+    /**
+     * Not Found Handler
+     *
+     * This method defines or invokes the application-wide Not Found handler.
+     * There are two contexts in which this method may be invoked:
+     *
+     * 1. When declaring the handler:
+     *
+     * If the $callable parameter is not null and is callable, this
+     * method will register the callable to be invoked when no
+     * routes match the current HTTP request. It WILL NOT invoke the callable.
+     *
+     * 2. When invoking the handler:
+     *
+     * If the $callable parameter is null, Slim assumes you want
+     * to invoke an already-registered handler. If the handler has been
+     * registered and is callable, it is invoked and sends a 404 HTTP Response
+     * whose body is the output of the Not Found handler.
+     *
+     * @param  mixed $callable Anything that returns true for is_callable()
+     */
+    public function notFound ($callable = null, $skipNotFound = false)
+    {
+        if (is_callable($callable)) {
+            $this->skipNotFound = $skipNotFound;
+            $this->notFound = $callable;
+        } else {
+            if ($this->skipNotFound) {
+                ob_start();
+                if (is_callable($this->notFound)) {
+                    call_user_func($this->notFound);
+                } else {
+                    call_user_func(array($this, 'defaultNotFound'));
+                }
+                $this->halt(404, ob_get_clean());
+            }
+        }
     }
 
     /**
