@@ -34,7 +34,7 @@ class Slim extends \Slim\Slim
     /**
      * @var bool Whether to skip notFound callback or not
      */
-    private $skipNotFound;
+    private $haltWhenNotFound;
 
     /**
      * Add multiple controller based routes
@@ -182,20 +182,22 @@ class Slim extends \Slim\Slim
      *
      * @param  mixed $callable Anything that returns true for is_callable()
      */
-    public function notFound ($callable = null, $skipNotFound = false)
+    public function notFound ($callable = null, $haltWhenNotFound = true)
     {
         if (is_callable($callable)) {
-            $this->skipNotFound = $skipNotFound;
+            $this->haltWhenNotFound = $haltWhenNotFound;
             $this->notFound = $callable;
         } else {
-            if ($this->skipNotFound) {
-                ob_start();
-                if (is_callable($this->notFound)) {
-                    call_user_func($this->notFound);
-                } else {
-                    call_user_func(array($this, 'defaultNotFound'));
-                }
+            ob_start();
+            if (is_callable($this->notFound)) {
+                call_user_func($this->notFound);
+            } else {
+                call_user_func(array($this, 'defaultNotFound'));
+            }
+            if ($this->haltWhenNotFound) {
                 $this->halt(404, ob_get_clean());
+            } else {
+                ob_flush();
             }
         }
     }
