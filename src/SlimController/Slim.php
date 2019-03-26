@@ -37,128 +37,55 @@ class Slim extends \Slim\Slim
     private $haltWhenNotFound;
 
     /**
-     * Add multiple controller based routes
+     * Create a closure that instantiates (or gets from container) and then calls
+     * the action method.
      *
-     * Simple Format
-     * <code>
-     * $app->addRoutes(array(
-     *  '/some/path' => 'className:methodName'
-     * ));
-     * </code>
+     * Also if the methods exist on the controller class, call setApp(), setRequest()
+     * and setResponse() passing in the appropriate object.
      *
-     * With explicit HTTP method
-     * <code>
-     * $app->addRoutes(array(
-     *  '/some/path' => array('get' => 'className:methodName')
-     * ));
-     * </code>
-     *
-     * With local middleware
-     * <code>
-     * $app->addRoutes(array(
-     *  '/some/path'  => array('get' => 'className:methodName', function() {})
-     *  '/other/path' => array('className:methodName', function() {})
-     * ));
-     * </code>
-     *
-     * With global middleware
-     * <code>
-     * $app->addRoutes(array(
-     *  '/some/path'  => 'className:methodName',
-     * ), function() {});
-     * </code>
-     *
-     * @param array $routes The route definitions
-     * @param array $globalMiddlewares
-     * @throws \InvalidArgumentException
-     * @internal param $callable ,... $middlewares Optional callable used for all routes as middleware
-     *
-     * @return $this
+     * @param  string $name controller class name and action method name separated by a colon
+     * @return callable
      */
-    public function addRoutes(array $routes, $globalMiddlewares = array())
+    protected function createControllerClosure($name)
     {
-        if (!is_array($globalMiddlewares)) {
-            if (func_num_args() > 2) {
-                $args = func_get_args();
-                $globalMiddlewares = array_slice($args, 1);
+        list($controllerName, $actionName) = $this->determineClassAndMethod($name);
+
+        // Create a callable that will find or create the controller instance
+        // and then execute the action
+        $app = $this;
+        $container = $this->container;
+        $response = $this->response();
+        $callable = function () use ($app, $response, $container, $controllerName, $actionName) {
+
+            // Try to fetch the controller instance from DI container
+            if (isset($container[$controllerName])) {
+                $controller = $container[$controllerName];
             } else {
-                $globalMiddlewares = array($globalMiddlewares);
-            }
-        }
-
-        foreach ($routes as $path => $routeArgs) {
-            // create array for simple request
-            $routeArgs = (is_array($routeArgs)) ? $routeArgs : array('any' => $routeArgs);
-
-            if (array_keys($routeArgs) === range(0, count($routeArgs) - 1)) {
-                // route args is a sequential array not associative
-                $routeArgs = array('any' => array($routeArgs[0],
-                    isset($routeArgs[1]) && is_array($routeArgs[1]) ? $routeArgs[1] : array_slice($routeArgs, 1))
-                );
-            }
-
-            foreach ($routeArgs as $httpMethod => $classArgs) {
-                // assign vars if middleware callback exists
-                if (is_array($classArgs)) {
-                    $classRoute       = $classArgs[0];
-                    $localMiddlewares = is_array($classArgs[1]) ? $classArgs[1] : array_slice($classArgs, 1);
+                // not in container, assume it can be directly instantiated
+                $reflectionClass = new \ReflectionClass($controllerName);
+                if ($reflectionClass->isSubclassOf('SlimController\SlimController')) {
+                    $controller = new $controllerName($app);
                 } else {
-                    $classRoute       = $classArgs;
-                    $localMiddlewares = array();
-                }
-
-                // specific HTTP method
-                $httpMethod = strtoupper($httpMethod);
-                if (!in_array($httpMethod, static::$ALLOWED_HTTP_METHODS)) {
-                    throw new \InvalidArgumentException("Http method '$httpMethod' is not supported.");
-                }
-
-                $routeMiddlewares = array_merge($localMiddlewares, $globalMiddlewares);
-                $route = $this->addControllerRoute($path, $classRoute, $routeMiddlewares);
-
-                if (!isset($this->routeNames[$classRoute])) {
-                    $route->name($classRoute);
-                    $this->routeNames[$classRoute] = 1;
-                }
-
-                if ('any' === $httpMethod) {
-                    call_user_func_array(array($route, 'via'), static::$ALLOWED_HTTP_METHODS);
-                } else {
-                    $route->via($httpMethod);
+                    $controller = new $controllerName();
                 }
             }
-        }
 
-        return $this;
-    }
+            $controllerArguments = func_get_args();
+            $result = call_user_func_array(array($controller, $actionName), $controllerArguments);
+            if ($result instanceof Response) {
+                $container['response'] = $result;
 
-    /**
-     * Add a new controller route
-     *
-     * <code>
-     * $app->addControllerRoute("/the/path", "className:methodName", array(function () { doSome(); }))
-     *  ->via('GET')->condition(..);
-     *
-     * $app->addControllerRoute("/the/path", "className:methodName")
-     * ->via('GET')->condition(..);
-     * </code>
-     *
-     * @param string     $path
-     * @param string     $route
-     * @param callable[] $middleware,...
-     *
-     * @return \Slim\Route
-     */
-    public function addControllerRoute($path, $route, array $middleware = array())
-    {
-        $callback = $this->buildCallbackFromControllerRoute($route);
+                return true;
+            } elseif (is_string($result)) {
+                $container['response'] = new Response($result);
 
-        array_unshift($middleware, $path);
-        array_push($middleware, $callback);
+                return true;
+            }
 
-        $route = call_user_func_array(array($this, 'map'), $middleware);
+            return $result;
+        };
 
-        return $route;
+        return $callable;
     }
 
     /**
@@ -200,40 +127,6 @@ class Slim extends \Slim\Slim
                 ob_flush();
             }
         }
-    }
-
-    /**
-     * Builds closure callback from controller route
-     *
-     * @param $route
-     *
-     * @return \Closure
-     */
-    protected function buildCallbackFromControllerRoute($route)
-    {
-        list($controller, $methodName) = $this->determineClassAndMethod($route);
-        $app      = & $this;
-        $callable = function () use ($app, $controller, $methodName) {
-            // Get action arguments
-            $args = func_get_args();
-            // Try to fetch the instance from Slim's container, otherwise lazy-instantiate it
-            $instance = $app->container->has($controller) ? $app->container->get($controller) : new $controller($app);
-
-            $result = call_user_func_array(array($instance, $methodName), $args);
-            if ($result instanceof Response) {
-                $container['response'] = $result;
-
-                return true;
-            } elseif (is_string($result)) {
-                $container['response'] = new Response($result);
-
-                return true;
-            }
-
-            return $result;
-        };
-
-        return $callable;
     }
 
     /**
