@@ -37,6 +37,27 @@ class Slim extends \Slim\Slim
     private $haltWhenNotFound;
 
     /**
+     * Add a route as per the parent method, additionally supporting the syntax
+     * "{controller class name}:{action method name}" as the last argument which
+     * will be converted to a closure that instantiates the controller (or gets
+     * from container) and then calls the method on it.
+     *
+     * @inheritdoc
+     *
+     * @param   array (See notes above)
+     * @return  \Slim\Route
+     */
+    public function mapRoute($args)
+    {
+        $callable = array_pop($args);
+        if (is_string($callable) && substr_count($callable, ':', 1) == 1) {
+            $callable = $this->createControllerClosure($callable);
+        }
+        $args[] = $callable;
+        return parent::mapRoute($args);
+    }
+
+    /**
      * Create a closure that instantiates (or gets from container) and then calls
      * the action method.
      *
