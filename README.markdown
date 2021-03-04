@@ -1,13 +1,11 @@
 # SlimController
 
-SlimController is an extension for [the Slim Framework](http://www.slimframework.com/) providing the C of MVC.
+More convenience over ` fortrabbit/slimcontroller`:
 
-With Slim alone, you can create great applications very, very quickly. Sometimes things get out of hand an you just need a bit more structure - or at least I do. That's what SlimController is for.
-
-[![Latest Stable Version](https://poser.pugx.org/slimcontroller/slimcontroller/v/stable.png)](https://packagist.org/packages/slimcontroller/slimcontroller)
-[![Total Downloads](https://poser.pugx.org/slimcontroller/slimcontroller/downloads.png)](https://packagist.org/packages/slimcontroller/slimcontroller)
-
-[![Build Status](https://travis-ci.org/fortrabbit/slimcontroller.png?branch=master)](https://travis-ci.org/fortrabbit/slimcontroller)
+ - Return rendered templates or `Response` objects directly from controller - no need for ugly `$this->app->response->setBody()`
+ - Render JsonSerializable objects into valid JSON response via `jsonResponse($myDataObj);`
+ - Use `notFound($legacyHandler, false)` method to pass-thru undefined routes handling to your legacy application
+ - Pass an implementation of `CrudApiControllerInterface` to a `resource()` method to get a set of CRUD API routes (see below for details)
 
 # Install via composer
 
@@ -15,13 +13,19 @@ Create a `composer.json` file
 
     {
         "require": {
-            "slimcontroller/slimcontroller": "0.4.3"
+            "slimcontroller/slimcontroller": "0.5.0"
         },
         "autoload": {
             "psr-0": {
                 "MyApp": "src/"
             }
-        }
+        },
+        "repositories": [
+            {
+                "type": "github",
+                "url": "https://github.com/eduard-sukharev/slimcontroller"
+            }
+        ]
     }
 
 Run installation
@@ -263,3 +267,98 @@ Defaults to `twig`. Will be appended to template name given in `render()` method
 
         }
     }
+
+## CRUD API Example
+
+Define CRUD resource with `resource()` method. First argument is always a base path. Last argument is always a route
+name prefix (for using with `urlFor()` method). Second to last argument is FQCN of your 
+`\SlimController\CrudApiControllerInterface` implementation. The rest is passed as route middlewares.
+Generated CRUD API routes pass managed entity id to controller actions by the name `$id`, so be careful with your
+implementation.
+
+### Controller
+
+Sample controller implementation using Predis package for accesing Redis store:
+
+```php
+    namespace MyApp\Controller;
+
+    class UsersController extends \SlimController\SlimController implements \SlimController\CrudApiControllerInterface
+    {
+
+        public function readAction()
+        {
+            $client = new Predis\Client();
+            return $this->jsonResponse($client->get('users:*'));
+        }
+    
+        /**
+         * @param string|int $id This parameter name is important!
+         */
+        public function getOneAction($id)
+        {
+            $client = new Predis\Client();
+            return $this->jsonResponse($client->get('users:'.$id));
+        }
+    
+        public function createAction()
+        {
+            $user = json_decode($this->app->request->getBody(), true);
+            $user['id'] = uuid4();
+            $client = new Predis\Client();
+            $client->set('users:'.$user['id'], $user);
+            
+            return $this->jsonResponse($user, 201);
+        }
+    
+        /**
+         * @param string|int $id This parameter name is important!
+         */
+        public function updateOneAction($id)
+        {
+            $user = json_decode($this->app->request->getBody(), true);
+            $client = new Predis\Client();
+            $client->set('users:'.$user['id'], $user);
+            
+            return $this->jsonResponse($user, 200);
+        }
+    
+        public function updateMultipleAction()
+        {
+            $users = json_decode($this->app->request->getBody(), true);
+            $client = new Predis\Client();
+            foreach ($users as $user) {
+                $client->set('users:'.$user['id'], $user);
+            }
+            
+            return $this->jsonResponse($users, 200);
+        }
+    
+        /**
+         * @param string|int $id This parameter name is important!
+         */
+        public function deleteAction($id)
+        {
+            $client = new Predis\Client();
+            $user = $client->get('users:'.$id);
+            $client->del('users:'.$id);
+            
+            return $this->jsonResponse($user, 200);
+        }
+    }
+```
+
+### Routes
+When defining routing add single line:
+```php
+    $app->resource('/api/users', new AuthRequiredMiddleware(), '\MyApp\Controller\UsersController', 'api.users');
+```
+
+What you actually get is a following set of routes available:
+
+ - `GET /api/users` - request all users, route name 'api.users.read'
+ - `GET /api/users/8f3f1e68-0fff-4e2c-8884-df7a60f9bd09` - create a user, route name 'api.users.get-one'
+ - `POST /api/users/create` - create a user, route name 'api.users.create'
+ - `POST /api/users/8f3f1e68-0fff-4e2c-8884-df7a60f9bd09` - update a user, route name 'api.users.update-one'
+ - `POST /api/users` - update a user, route name 'api.users.update-multiple'
+ - `DELETE /api/users/8f3f1e68-0fff-4e2c-8884-df7a60f9bd09` - delete a user, route name 'api.users.delete'
