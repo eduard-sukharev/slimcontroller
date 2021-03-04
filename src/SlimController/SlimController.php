@@ -115,8 +115,8 @@ abstract class SlimController
 
             throw new \InvalidArgumentException(json_last_error_msg());
         }
-        $this->app->response->setBody($jsonBody);
         $this->app->response->header('Content-Type', 'application/json');
+        $this->app->response->setBody($jsonBody);
         $this->app->response->setStatus($statusCode);
     }
 

@@ -97,7 +97,8 @@ class Slim extends \Slim\Slim
                 $container['response'] = $result;
 
                 return true;
-            } elseif (is_string($result)) {
+            }
+            if (is_string($result)) {
                 $container['response'] = new Response($result);
 
                 return true;
