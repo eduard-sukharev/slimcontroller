@@ -188,4 +188,21 @@ class Slim extends \Slim\Slim
 
         return array($className, $methodName);
     }
+
+    public function resource()
+    {
+        $args = func_get_args();
+        $baseUrl = rtrim(array_shift($args), '/');
+        $routeNamePrefix = array_pop($args);
+        $crudControllerClass = array_pop($args);
+        if (!class_exists($crudControllerClass) || !is_subclass_of($crudControllerClass, '\SlimController\CrudApiControllerInterface')) {
+            throw new \InvalidArgumentException("Controller class must implement interface \SlimController\CrudApiControllerInterface");
+        }
+        $this->get($baseUrl, $args, $crudControllerClass . ':read')->name($routeNamePrefix . '.read');
+        $this->get($baseUrl . '/:id', $args, $crudControllerClass . ':getOne')->name($routeNamePrefix . '.get-one');
+        $this->post($baseUrl . '/create', $args, $crudControllerClass . ':create')->name($routeNamePrefix . '.create');
+        $this->post($baseUrl . '/:id', $args, $crudControllerClass . ':updateOne')->name($routeNamePrefix . '.update-one');
+        $this->post($baseUrl, $args, $crudControllerClass . ':updateMultiple')->name($routeNamePrefix . '.update-multiple');
+        $this->delete($baseUrl . '/:id', $args, $crudControllerClass . ':delete')->name($routeNamePrefix . '.delete');
+    }
 }
