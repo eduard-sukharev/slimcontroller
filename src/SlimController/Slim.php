@@ -159,6 +159,31 @@ class Slim extends \Slim\Slim
      */
     protected function determineClassAndMethod($classMethod)
     {
+        // determine method suffix or default to "Action"
+        $methodNameSuffix = $this->config('controller.method_suffix');
+        if (is_null($methodNameSuffix)) {
+            $methodNameSuffix = 'Action';
+        }
+        if (!stripos($classMethod, ':')) {
+            throw new \InvalidArgumentException(
+                "Malformed class action for '$classMethod'. Use 'className:methodName' format."
+            );
+        }
+
+        // having <className>:<methodName>
+        list($shortClassName, $shortMethodName) = explode(':', $classMethod);
+
+        return array($this->determineClass($shortClassName), $shortMethodName . $methodNameSuffix);
+    }
+
+    /**
+     * @param string $shortClassName
+     *
+     * @return string
+     * @throws \InvalidArgumentException
+     */
+    protected function determineClass($shortClassName)
+    {
         // determine class prefix (eg "\Vendor\Bundle\Controller") and suffix (eg "Controller")
         $classNamePrefix = $this->config('controller.class_prefix');
         if ($classNamePrefix && substr($classNamePrefix, -strlen($classNamePrefix) !== '\\')) {
@@ -166,28 +191,12 @@ class Slim extends \Slim\Slim
         }
         $classNameSuffix = $this->config('controller.class_suffix') ? : '';
 
-        // determine method suffix or default to "Action"
-        $methodNameSuffix = $this->config('controller.method_suffix');
-        if (is_null($methodNameSuffix)) {
-            $methodNameSuffix = 'Action';
+        $realClassName  = $shortClassName . $classNameSuffix;
+        if (strpos($realClassName, '\\') !== 0) {
+            $realClassName = $classNamePrefix . $shortClassName . $classNameSuffix;
         }
-        $realClassMethod  = $classMethod;
-        if (strpos($realClassMethod, '\\') !== 0) {
-            $realClassMethod = $classNamePrefix . $classMethod;
-        }
+        return $realClassName;
 
-        // having <className>:<methodName>
-        if (preg_match('/^([a-zA-Z0-9\\\\_]+):([a-zA-Z0-9_]+)$/', $realClassMethod, $match)) {
-            $className  = $match[1] . $classNameSuffix;
-            $methodName = $match[2] . $methodNameSuffix;
-        } // malformed
-        else {
-            throw new \InvalidArgumentException(
-                "Malformed class action for '$classMethod'. Use 'className:methodName' format."
-            );
-        }
-
-        return array($className, $methodName);
     }
 
     public function resource()
@@ -195,15 +204,24 @@ class Slim extends \Slim\Slim
         $args = func_get_args();
         $baseUrl = rtrim(array_shift($args), '/');
         $routeNamePrefix = array_pop($args);
-        $crudControllerClass = array_pop($args);
+        $classAlias = array_pop($args);
+        $crudControllerClass = $this->determineClass($classAlias);
         if (!class_exists($crudControllerClass) || !is_subclass_of($crudControllerClass, '\SlimController\CrudApiControllerInterface')) {
             throw new \InvalidArgumentException("Controller class must implement interface \SlimController\CrudApiControllerInterface");
         }
-        $this->get($baseUrl, $args, $crudControllerClass . ':read')->name($routeNamePrefix . '.read');
-        $this->get($baseUrl . '/:id', $args, $crudControllerClass . ':getOne')->name($routeNamePrefix . '.get-one');
-        $this->post($baseUrl . '/create', $args, $crudControllerClass . ':create')->name($routeNamePrefix . '.create');
-        $this->post($baseUrl . '/:id', $args, $crudControllerClass . ':updateOne')->name($routeNamePrefix . '.update-one');
-        $this->post($baseUrl, $args, $crudControllerClass . ':updateMultiple')->name($routeNamePrefix . '.update-multiple');
-        $this->delete($baseUrl . '/:id', $args, $crudControllerClass . ':delete')->name($routeNamePrefix . '.delete');
+
+        call_user_func_array(array($this, 'get'), $this->bakeRouteArgs($baseUrl, $args, $classAlias . ':read'))->name($routeNamePrefix . '.read');
+        call_user_func_array(array($this, 'get'), $this->bakeRouteArgs($baseUrl . '/:id', $args, $classAlias . ':getOne'))->name($routeNamePrefix . '.get-one');
+        call_user_func_array(array($this, 'post'), $this->bakeRouteArgs($baseUrl . '/create', $args, $classAlias . ':create'))->name($routeNamePrefix . '.create');
+        call_user_func_array(array($this, 'post'), $this->bakeRouteArgs($baseUrl . '/:id', $args, $classAlias . ':updateOne'))->name($routeNamePrefix . '.update-one');
+        call_user_func_array(array($this, 'post'), $this->bakeRouteArgs($baseUrl, $args, $classAlias . ':updateMultiple'))->name($routeNamePrefix . '.update-multiple');
+        call_user_func_array(array($this, 'delete'), $this->bakeRouteArgs($baseUrl . '/:id', $args, $classAlias . ':delete'))->name($routeNamePrefix . '.delete');
+    }
+
+    protected function bakeRouteArgs($path, $args, $controller)
+    {
+        array_unshift($args, $path);
+        $args[] = $controller;
+        return $args;
     }
 }
